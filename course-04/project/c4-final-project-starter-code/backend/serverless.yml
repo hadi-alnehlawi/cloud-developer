@@ -3,61 +3,268 @@ service:
 
 plugins:
   - serverless-webpack
-  - serverless-iam-roles-per-function
+  - serverless-iam-roles-per-function # define iam role for each particular functions
+  - serverless-aws-documentation # use for document info of app
+  - serverless-reqvalidator-plugin # validate request body
+  - serverless-plugin-canary-deployments 
 
 provider:
   name: aws
-  runtime: nodejs8.10
+  runtime: nodejs12.x
 
   stage: ${opt:stage, 'dev'}
-  region: ${opt:region, 'us-east-1'}
+  region: ${opt:region, 'us-east-2'}
+
+  tracing: 
+    lambda: true
+    apiGateway: true
+
+  # Dynamodb Tables: 
+  environment: 
+    TODOS_TABLE: Todos-${self:provider.stage}
+    TODOS_S3_BUCKET: ploratran-todos-images-ab4ff-${self:provider.stage}
+    SIGNED_URL_EXPIRATION: 300
+    INDEX_TABLE: IndexTable-${self:provider.stage}
+
+custom: 
+  documentation: 
+    api: 
+      info: 
+        version: v1.0.0
+        title: Todos API
+        description: Serverless exercise for todos list
+    # JSON Schema to validate HTTP request using serverless-reqvalidator-plugin
+    models: 
+      - name: CreateRequest
+        contentType: application/json
+        schema: ${file(model-validators/create-todo-request.json)}
+      - name: UpdateRequest
+        contentType: application/json
+        schema: ${file(model-validators/update-todo-request.json)}
 
 functions:
 
-  Auth:
+  RS256Auth:
     handler: src/lambda/auth/auth0Authorizer.handler
 
   # TODO: Configure this function
   GetTodos:
     handler: src/lambda/http/getTodos.handler
+    iamRoleStatements:
+      - Effect: Allow # permission to Query table
+        Action:
+          - dynamodb:Query
+        # Query from Index Table for fast
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}/index/${self:provider.environment.INDEX_TABLE}
+      - Effect: "Allow" # xray permissions (required) 
+        Action:
+          - "xray:PutTraceSegments"
+          - "xray:PutTelemetryRecords"
+        Resource:
+          - "*"
     events:
       - http:
           method: get
           path: todos
+          cors: true
+          authorizer: RS256Auth
+          reqValidatorName: RequestBodyValidator
 
   # TODO: Configure this function
-  GetTodos:
   CreateTodo:
     handler: src/lambda/http/createTodo.handler
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem # allow to insert new item into table
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
+      - Effect: "Allow" # xray permissions
+        Action:
+          - "xray:PutTraceSegments"
+          - "xray:PutTelemetryRecords"
+        Resource:
+          - "*"
     events:
       - http:
           method: post
           path: todos
+          cors: true
+          authorizer: RS256Auth
+          reqValidatorName: RequestBodyValidator
+          documentation: 
+            summary: Create a new todo
+            description: Create a new todo
+            requestModels: 
+              'application/json': CreateRequest
 
   # TODO: Configure this function
   UpdateTodo:
     handler: src/lambda/http/updateTodo.handler
+    iamRoleStatements:
+      - Effect: Allow 
+        Action:
+          - dynamodb:UpdateItem # permission to Update Item in the table
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
+      - Effect: "Allow" # xray permissions 
+        Action:
+          - "xray:PutTraceSegments"
+          - "xray:PutTelemetryRecords"
+        Resource:
+          - "*"
     events:
       - http:
           method: patch
           path: todos/{todoId}
+          cors: true
+          authorizer: RS256Auth
+          reqValidatorName: RequestBodyValidator
+          documentation: 
+            summary: Update a new todo
+            description: Update a new todo
+            requestModels: 
+              'application/json': UpdateRequest
+
 
   # TODO: Configure this function
   DeleteTodo:
     handler: src/lambda/http/deleteTodo.handler
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action: 
+          - dynamodb:DeleteItem # allow to delete single item in table
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
+      - Effect: "Allow" # xray permissions (required) 
+        Action:
+          - "xray:PutTraceSegments"
+          - "xray:PutTelemetryRecords"
+        Resource:
+          - "*"
     events:
       - http:
           method: delete
           path: todos/{todoId}
+          cors: true
+          authorizer: RS256Auth
+          reqValidatorName: RequestBodyValidator
+          documentation: 
+            summary: delete an item in the table
+            description: delete an item
 
   # TODO: Configure this function
   GenerateUploadUrl:
     handler: src/lambda/http/generateUploadUrl.handler
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action: # allow to perform Put and Get s3 url
+          - s3:PutObject
+          - s3:GetObject
+        Resource: arn:aws:s3:::${self:provider.environment.TODOS_S3_BUCKET}/*
+      - Effect: "Allow" # xray permissions (required) 
+        Action:
+          - "xray:PutTraceSegments"
+          - "xray:PutTelemetryRecords"
+        Resource:
+          - "*"
     events:
       - http:
           method: post
           path: todos/{todoId}/attachment
+          cors: true
+          authorizer: RS256Auth
 
 resources:
   Resources:
     # TODO: Add any necessary AWS resources
+    # 1) Validate Request Body: 
+    RequestBodyValidator:
+      Type: AWS::ApiGateway::RequestValidator
+      Properties: 
+        Name: 'request-body-validator'
+        RestApiId:
+          Ref: ApiGatewayRestApi
+        ValidateRequestBody: true
+        ValidateRequestParameters: false
+
+    # 2) Response from 400+ error: 
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+
+    # 3) Configure S3 Bucket Attachment and Policy: 
+    AttachmentsBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.TODOS_S3_BUCKET}
+        CorsConfiguration:
+          CorsRules:
+            -
+              AllowedOrigins:
+                - '*'
+              AllowedHeaders:
+                - '*'
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+                - HEAD
+              MaxAge: 3000
+    
+    BucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        PolicyDocument:
+          Id: MyPolicy
+          Version: '2012-10-17'
+          Statement:
+            - Sid: PublicReadForGetBucketObjects
+              Effect: Allow
+              Principal: '*'
+              Action: 's3:GetObject'
+              Resource: 'arn:aws:s3:::${self:provider.environment.TODOS_S3_BUCKET}/*'
+        Bucket: !Ref AttachmentsBucket
+    
+    # 4) Todos DymamoDB Table: 
+    TodosDynamoDBTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: userId # partition key
+            AttributeType: S
+          - AttributeName: createdAt # index key
+            AttributeType: S
+          - AttributeName: todoId # sort key
+            AttributeType: S
+        KeySchema:
+          # 1:M (One user -> Many todos)
+          - AttributeName: userId 
+            KeyType: HASH # partition key
+          - AttributeName: todoId 
+            KeyType: RANGE # sort key
+        BillingMode: PAY_PER_REQUEST # On-demand Capacity Mode
+        TableName: ${self:provider.environment.TODOS_TABLE}
+
+        # Use Local Secondary Index instead of Gloal because:
+        # 1) Acts like an additional sort key => sort items by a different attribute
+        # => sort table with "createdAt" attribute in this case
+        # 2) Partition key must be the same with base table (TODOS_TABLE) => same userId as partition key in this case
+        # 3) Query with specified/single partition => Cannot use .scan() to query entire table
+        # 4) Only define at table creation time => GSI will create new table
+        LocalSecondaryIndexes:
+          - IndexName: ${self:provider.environment.INDEX_TABLE}
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH # partition key
+              - AttributeName: createdAt
+                KeyType: RANGE # sort key
+            Projection:
+              # Options: KEYS_ONLY, INCLUDE OR ALL
+              # Read more: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html
+              ProjectionType: ALL

@@ -1,7 +1,31 @@
 import 'source-map-support/register'
+import { createLogger } from '../../utils/logger'
+import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda'
+import { getTodoList } from '../../businessLogic/todoLogic'
+import * as middy from 'middy'
+import { cors } from 'middy/middlewares'
 
-import { APIGatewayProxyEvent, APIGatewayProxyResult, APIGatewayProxyHandler } from 'aws-lambda'
+const logger = createLogger('Get Todo');
 
-export const handler: APIGatewayProxyHandler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+export const handler = middy(
+    async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   // TODO: Get all TODO items for a current user
-}
+    logger.info('Get all todo from list');
+    const authorization = event.headers.Authorization
+    const split = authorization.split(' ')
+    const jwtToken = split[1]
+    const todoList = await getTodoList(jwtToken); 
+
+    logger.info(`List of item: ${todoList}`);
+
+    return {
+        statusCode: 200,
+        body: JSON.stringify({
+            items: todoList
+        })
+    }
+});
+
+handler.use(
+    cors({ credentials: true})
+)
