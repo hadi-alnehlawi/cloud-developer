@@ -11,7 +11,7 @@ const logger = createLogger('auth')
 
 // You can read more about how to do this here: https://auth0.com/blog/navigating-rs256-and-jwks/
 // Go to an Auth0 page -> Show Advanced Settings -> Endpoints -> JSON Web Key Set
-const jwksUrl = 'https://dev-a6-tsbmc.us.auth0.com/.well-known/jwks.json' // JWKS endpoint
+const jwksUrl = 'https://hadi-alnehlawi.eu.auth0.com/.well-known/jwks.json'
 
 export const handler = async (event: CustomAuthorizerEvent): Promise<CustomAuthorizerResult> => {
   logger.info('Authorizing a user', event.authorizationToken)
