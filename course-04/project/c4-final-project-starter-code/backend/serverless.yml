@@ -13,7 +13,7 @@ provider:
   runtime: nodejs12.x
 
   stage: ${opt:stage, 'dev'}
-  region: ${opt:region, 'us-east-2'}
+  region: ${opt:region, 'ap-south-1'}
 
   tracing: 
     lambda: true
@@ -51,12 +51,11 @@ functions:
   GetTodos:
     handler: src/lambda/http/getTodos.handler
     iamRoleStatements:
-      - Effect: Allow # permission to Query table
+      - Effect: Allow
         Action:
           - dynamodb:Query
-        # Query from Index Table for fast
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}/index/${self:provider.environment.INDEX_TABLE}
-      - Effect: "Allow" # xray permissions (required) 
+      - Effect: "Allow" 
         Action:
           - "xray:PutTraceSegments"
           - "xray:PutTelemetryRecords"
@@ -76,9 +75,9 @@ functions:
     iamRoleStatements:
       - Effect: Allow
         Action:
-          - dynamodb:PutItem # allow to insert new item into table
+          - dynamodb:PutItem 
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
-      - Effect: "Allow" # xray permissions
+      - Effect: "Allow"
         Action:
           - "xray:PutTraceSegments"
           - "xray:PutTelemetryRecords"
@@ -97,15 +96,14 @@ functions:
             requestModels: 
               'application/json': CreateRequest
 
-  # TODO: Configure this function
   UpdateTodo:
     handler: src/lambda/http/updateTodo.handler
     iamRoleStatements:
       - Effect: Allow 
         Action:
-          - dynamodb:UpdateItem # permission to Update Item in the table
+          - dynamodb:UpdateItem 
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
-      - Effect: "Allow" # xray permissions 
+      - Effect: "Allow"
         Action:
           - "xray:PutTraceSegments"
           - "xray:PutTelemetryRecords"
@@ -131,9 +129,9 @@ functions:
     iamRoleStatements:
       - Effect: "Allow"
         Action: 
-          - dynamodb:DeleteItem # allow to delete single item in table
+          - dynamodb:DeleteItem
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
-      - Effect: "Allow" # xray permissions (required) 
+      - Effect: "Allow" 
         Action:
           - "xray:PutTraceSegments"
           - "xray:PutTelemetryRecords"
@@ -155,11 +153,11 @@ functions:
     handler: src/lambda/http/generateUploadUrl.handler
     iamRoleStatements:
       - Effect: "Allow"
-        Action: # allow to perform Put and Get s3 url
+        Action:
           - s3:PutObject
           - s3:GetObject
         Resource: arn:aws:s3:::${self:provider.environment.TODOS_S3_BUCKET}/*
-      - Effect: "Allow" # xray permissions (required) 
+      - Effect: "Allow"
         Action:
           - "xray:PutTraceSegments"
           - "xray:PutTelemetryRecords"
@@ -261,9 +259,9 @@ resources:
           - IndexName: ${self:provider.environment.INDEX_TABLE}
             KeySchema:
               - AttributeName: userId
-                KeyType: HASH # partition key
+                KeyType: HASH
               - AttributeName: createdAt
-                KeyType: RANGE # sort key
+                KeyType: RANGE
             Projection:
               # Options: KEYS_ONLY, INCLUDE OR ALL
               # Read more: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html
